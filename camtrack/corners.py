@@ -50,18 +50,39 @@ class _CornerStorageBuilder:
 def _build_impl(frame_sequence: pims.FramesSequence,
                 builder: _CornerStorageBuilder) -> None:
 
-    img0 = frame_sequence[0]
-    p0 = cv2.goodFeaturesToTrack(img0, 100, 0.003, 20, blockSize=10)
+    BLOCK_SIZE = 5
+    MIN_DIST = 5
+    QUALITY = 0.01
 
-    ids = np.array(list(range(len(p0))))
-    sizes = np.array([15] * len(p0))
+    img0 = frame_sequence[0]
+    p0 = cv2.goodFeaturesToTrack(img0, 0, QUALITY, MIN_DIST, blockSize=BLOCK_SIZE)
+
+    last_id = len(p0)
+    ids = np.array(list(range(last_id)))
+    sizes = np.array([BLOCK_SIZE] * last_id)
 
     corners = FrameCorners(ids, p0, sizes)
     builder.set_corners_at_frame(0, corners)
     for frame, img1 in enumerate(frame_sequence[1:], 1):
         p1, st, _ = cv2.calcOpticalFlowPyrLK(np.uint8(img0 * 255), np.uint8(img1 * 255), p0, None)
 
-        p0 = p1
+        mask = st.reshape(-1) == 1
+        corners = p1[mask]
+        ids = ids[mask]
+
+        new_corners = cv2.goodFeaturesToTrack(img1, 0, QUALITY, MIN_DIST, blockSize=BLOCK_SIZE)
+        distances = np.min(((new_corners - corners.reshape(1, -1, 2)) ** 2).sum(axis=2), axis=1)
+
+        distance_mask = distances >= MIN_DIST
+        nice_corners = new_corners[distance_mask]
+        new_ids = np.append(ids, np.array(range(last_id, last_id + distance_mask.sum())))
+        last_id += distance_mask.sum()
+
+        np.append(ids, new_ids)
+        np.append(corners, nice_corners)
+        sizes = np.ones(len(ids)) * BLOCK_SIZE
+
+        p0 = corners
         builder.set_corners_at_frame(frame, FrameCorners(ids, p0, sizes))
         img0 = img1
 
