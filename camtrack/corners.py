@@ -51,7 +51,7 @@ def _build_impl(frame_sequence: pims.FramesSequence,
                 builder: _CornerStorageBuilder) -> None:
 
     BLOCK_SIZE = 5
-    MIN_DIST = 5
+    MIN_DIST = 10
     QUALITY = 0.01
 
     img0 = frame_sequence[0]
@@ -61,13 +61,12 @@ def _build_impl(frame_sequence: pims.FramesSequence,
     ids = np.array(list(range(last_id)))
     sizes = np.array([BLOCK_SIZE] * last_id)
 
-    corners = FrameCorners(ids, p0, sizes)
-    builder.set_corners_at_frame(0, corners)
+    builder.set_corners_at_frame(0, FrameCorners(ids, p0, sizes))
     for frame, img1 in enumerate(frame_sequence[1:], 1):
         p1, st, _ = cv2.calcOpticalFlowPyrLK(np.uint8(img0 * 255), np.uint8(img1 * 255), p0, None)
 
         mask = st.reshape(-1) == 1
-        corners = p1[mask]
+        corners = p0[mask]
         ids = ids[mask]
 
         new_corners = cv2.goodFeaturesToTrack(img1, 0, QUALITY, MIN_DIST, blockSize=BLOCK_SIZE)
