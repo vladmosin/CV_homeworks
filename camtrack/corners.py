@@ -16,6 +16,8 @@ import click
 import cv2
 import numpy as np
 import pims
+from scipy.spatial import distance_matrix
+
 
 from _corners import (
     FrameCorners,
@@ -48,17 +50,40 @@ class _CornerStorageBuilder:
 
 def _build_impl(frame_sequence: pims.FramesSequence,
                 builder: _CornerStorageBuilder) -> None:
-    # TODO
-    image_0 = frame_sequence[0]
-    corners = FrameCorners(
-        np.array([0]),
-        np.array([[0, 0]]),
-        np.array([55])
-    )
-    builder.set_corners_at_frame(0, corners)
-    for frame, image_1 in enumerate(frame_sequence[1:], 1):
-        builder.set_corners_at_frame(frame, corners)
-        image_0 = image_1
+
+    BLOCK_SIZE = 6
+    MIN_DIST = 10
+    QUALITY = 0.01
+    MAX_CORNERS = 1000
+
+    img0 = frame_sequence[0]
+    p0 = cv2.goodFeaturesToTrack(img0, MAX_CORNERS, QUALITY, MIN_DIST, blockSize=BLOCK_SIZE).squeeze(1)
+
+    last_id = len(p0)
+    ids = np.arange(last_id)
+    frame_corners = FrameCorners(ids, p0, np.ones(len(ids)) * BLOCK_SIZE)
+
+    builder.set_corners_at_frame(0, frame_corners)
+    for frame, img1 in enumerate(frame_sequence[1:], 1):
+        p0, st, _ = cv2.calcOpticalFlowPyrLK(np.uint8(img0 * 255), np.uint8(img1 * 255), p0,
+                                             None, winSize=(12, 12), maxLevel=3, minEigThreshold=0.001)
+        st = st.reshape(-1)
+
+        p0 = p0[st == 1]
+        ids = ids[st == 1]
+
+        p1 = cv2.goodFeaturesToTrack(img1, MAX_CORNERS, QUALITY, MIN_DIST, blockSize=BLOCK_SIZE).squeeze(1)
+
+        distances = distance_matrix(p1, p0).min(axis=1)
+        p1 = p1[distances >= MIN_DIST, :]
+
+        p0 = np.concatenate([p0, p1])
+        ids = np.concatenate([ids, np.arange(last_id, last_id + len(p1))])
+        last_id += len(p1)
+
+        frame_corners = FrameCorners(ids, p0, np.ones(len(ids)) * BLOCK_SIZE)
+        builder.set_corners_at_frame(frame, frame_corners)
+        img0 = img1
 
 
 def build(frame_sequence: pims.FramesSequence,
