@@ -46,12 +46,12 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     max_reprojection_error = 5
     min_triangulation_angle_deg = 2
     min_depth = 0.1
-    min_intersection = 10
+    min_intersection = 12
     max_error = 20
 
     triangulation_parameters = TriangulationParameters(
         max_reprojection_error=max_reprojection_error,
-        min_triangulation_angle_deg=min_triangulation_angle_deg,
+        min_triangulation_angle_deg=0,
         min_depth=min_depth
     )
 
@@ -67,6 +67,12 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     correspondence = build_correspondences(corner_storage[fid], corner_storage[sid])
     points3d, corr_ids, _ = triangulate_correspondences(
         correspondence, view_mats[fid], view_mats[sid], intrinsic_mat, triangulation_parameters
+    )
+
+    triangulation_parameters = TriangulationParameters(
+        max_reprojection_error=max_reprojection_error,
+        min_triangulation_angle_deg=min_triangulation_angle_deg,
+        min_depth=min_depth
     )
 
     point_cloud_builder = PointCloudBuilder(corr_ids, points3d)
