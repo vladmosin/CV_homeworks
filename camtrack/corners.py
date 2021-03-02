@@ -17,6 +17,7 @@ import cv2
 import numpy as np
 import pims
 from scipy.spatial import distance_matrix
+from copy import deepcopy
 
 
 from _corners import (
