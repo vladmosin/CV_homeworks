@@ -24,8 +24,76 @@ from _camtrack import (
     build_correspondences,
     triangulate_correspondences,
     rodrigues_and_translation_to_view_mat3x4,
-    calc_inlier_indices
+    calc_inlier_indices,
+    eye3x4,
+    Correspondences
 )
+
+max_reprojection_error = 5
+min_triangulation_angle_deg = 2
+min_depth = 0.1
+min_intersection = 12
+max_error = 20
+threshold = 0.1
+
+
+def get_best_view(points_1, points_2, ids, intrinsic_mat, R1, R2, t):
+    view_mat_1 = eye3x4()
+    triangulation_params = TriangulationParameters(
+        max_reprojection_error=max_reprojection_error,
+        min_triangulation_angle_deg=min_triangulation_angle_deg,
+        min_depth=min_depth
+    )
+
+    correspondence = Correspondences(ids, points_1, points_2)
+
+    _, corr_ids1, _ = triangulate_correspondences(
+        correspondence, view_mat_1, np.hstack((R1, t)), intrinsic_mat, triangulation_params
+    )
+
+    _, corr_ids2, _ = triangulate_correspondences(
+        correspondence, view_mat_1, np.hstack((R2, t)), intrinsic_mat, triangulation_params
+    )
+
+    if len(corr_ids1) > len(corr_ids2):
+        return R1, len(corr_ids1)
+    else:
+        return R2, len(corr_ids2)
+
+
+def collect_views(i, j, R, t):
+    return (i, view_mat3x4_to_pose(eye3x4())), (j, view_mat3x4_to_pose(np.hstack((R, t))))
+
+
+def find_known_views(corner_storage: CornerStorage, intrinsic_mat: np.ndarray):
+    n = len(corner_storage)
+
+    scores = []
+
+    for i in range(n):
+        for j in range(i + 5, n):
+            intersection, indices = snp.intersect(corner_storage[i].ids.reshape(-1), corner_storage[j].ids.reshape(-1), indices=True)
+
+            if len(intersection) < 10:
+                break
+
+            points1 = corner_storage[i].points[indices[0]]
+            points2 = corner_storage[j].points[indices[1]]
+            essential_mat, inliers = cv2.findEssentialMat(points1, points2, intrinsic_mat, method=cv2.RANSAC, threshold=threshold)
+
+            mask = inliers.reshape(-1) == 1
+
+            R1, R2, t = cv2.decomposeEssentialMat(essential_mat)
+            R, val = get_best_view(points1[mask], points2[mask], intersection[mask], intrinsic_mat, R1, R2, t)
+
+            scores.append([i, j, R, t, val])
+
+            if val > 60:
+                return collect_views(i, j, R, t)
+
+    i, j, R, t, _ = max(scores, key=lambda x: x[-1])
+
+    return collect_views(i, j, R, t)
 
 
 def track_and_calc_colors(camera_parameters: CameraParameters,
@@ -34,24 +102,18 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                           known_view_1: Optional[Tuple[int, Pose]] = None,
                           known_view_2: Optional[Tuple[int, Pose]] = None) \
         -> Tuple[List[Pose], PointCloud]:
-    if known_view_1 is None or known_view_2 is None:
-        raise NotImplementedError()
-
     rgb_sequence = frameseq.read_rgb_f32(frame_sequence_path)
     intrinsic_mat = to_opencv_camera_mat3x3(
         camera_parameters,
         rgb_sequence[0].shape[0]
     )
 
-    max_reprojection_error = 5
-    min_triangulation_angle_deg = 2
-    min_depth = 0.1
-    min_intersection = 12
-    max_error = 20
+    if known_view_1 is None or known_view_2 is None:
+        known_view_1, known_view_2 = find_known_views(corner_storage, intrinsic_mat)
 
     triangulation_parameters = TriangulationParameters(
         max_reprojection_error=max_reprojection_error,
-        min_triangulation_angle_deg=0,
+        min_triangulation_angle_deg=min_triangulation_angle_deg,
         min_depth=min_depth
     )
 
@@ -109,8 +171,8 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                         continue
 
                     correspondence = build_correspondences(
-                            corner_storage[i], corner_storage[j],
-                            np.concatenate([point_cloud_builder.ids, outliers_ids[:, None]])
+                        corner_storage[i], corner_storage[j],
+                        np.concatenate([point_cloud_builder.ids, outliers_ids[:, None]])
                     )
 
                     points3d, corr_ids, median_cos = triangulate_correspondences(
