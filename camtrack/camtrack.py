@@ -32,7 +32,7 @@ from _camtrack import (
 max_reprojection_error = 5
 min_triangulation_angle_deg = 2
 min_depth = 0.1
-min_intersection = 12
+min_intersection = 8
 max_error = 20
 threshold = 0.1
 
@@ -94,6 +94,24 @@ def find_known_views(corner_storage: CornerStorage, intrinsic_mat: np.ndarray):
     i, j, R, t, _ = max(scores, key=lambda x: x[-1])
 
     return collect_views(i, j, R, t)
+
+
+def first_not_none(view_mats, i):
+    n = len(view_mats)
+    for j in range(n):
+        if i + j < n and view_mats[i + j] is not None:
+            return view_mats[i + j]
+        if i - j >= 0 and view_mats[i - j] is not None:
+            return view_mats[i - j]
+
+
+def remove_none(view_mats):
+    n = len(view_mats)
+    for i in range(n):
+        if view_mats[i] is not None:
+            continue
+        else:
+            view_mats[i] = first_not_none(view_mats, i)
 
 
 def track_and_calc_colors(camera_parameters: CameraParameters,
@@ -175,12 +193,8 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                         np.concatenate([point_cloud_builder.ids, outliers_ids[:, None]])
                     )
 
-                    points3d, corr_ids, median_cos = triangulate_correspondences(
-                        correspondence,
-                        view_mats[i], view_mats[j],
-                        intrinsic_mat,
-                        triangulation_parameters
-                    )
+                    points3d, corr_ids, _ = triangulate_correspondences(
+                        correspondence, view_mats[i], view_mats[j], intrinsic_mat, triangulation_parameters)
                     point_cloud_builder.add_points(corr_ids, points3d)
 
                 for j in range(frame_count):
@@ -191,10 +205,12 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                                                           corner_storage[j].ids.squeeze(1), indices=True)
                     points_cloud = point_cloud_builder.points[indices[0]]
                     points_corners = corner_storage[j].points[indices[1]]
-                    inliers = calc_inlier_indices(points_cloud, points_corners,
-                                                  intrinsic_mat @ view_mats[j],
-                                                  max_error)
+                    inliers = calc_inlier_indices(
+                        points_cloud, points_corners, intrinsic_mat @ view_mats[j], max_error
+                    )
                     point_cloud_builder.remove_points(np.delete(intersection, inliers))
+
+    remove_none(view_mats)
 
     calc_point_cloud_colors(
         point_cloud_builder,
