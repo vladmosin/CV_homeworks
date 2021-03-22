@@ -71,9 +71,6 @@ def find_known_views(corner_storage: CornerStorage, intrinsic_mat: np.ndarray):
         for j in range(i + 1, n):
             intersection, indices = snp.intersect(corner_storage[i].ids.reshape(-1), corner_storage[j].ids.reshape(-1), indices=True)
 
-            if len(intersection) < 10:
-                break
-
             points1 = corner_storage[i].points[indices[0]]
             points2 = corner_storage[j].points[indices[1]]
             essential_mat, inliers = cv2.findEssentialMat(points1, points2, intrinsic_mat, method=cv2.RANSAC, threshold=threshold)
@@ -91,9 +88,6 @@ def find_known_views(corner_storage: CornerStorage, intrinsic_mat: np.ndarray):
             R, t, val = get_best_view(points1[mask], points2[mask], intersection[mask], intrinsic_mat, R1, R2, t)
 
             scores.append([i, j, R, t, val])
-
-            if val > 60:
-                return collect_views(i, j, R, t)
 
     i, j, R, t, _ = max(scores, key=lambda x: x[-1])
 
