@@ -37,7 +37,7 @@ max_error = 20
 threshold = 0.1
 
 
-def get_best_view(points_1, points_2, ids, intrinsic_mat, R1, R2, t):
+def get_best_view(points_1, points_2, ids, intrinsic_mat, R1, R2, t_abs):
     view_mat_1 = eye3x4()
     triangulation_params = TriangulationParameters(
         max_reprojection_error=max_reprojection_error,
@@ -46,19 +46,16 @@ def get_best_view(points_1, points_2, ids, intrinsic_mat, R1, R2, t):
     )
 
     correspondence = Correspondences(ids, points_1, points_2)
+    stats = []
 
-    _, corr_ids1, _ = triangulate_correspondences(
-        correspondence, view_mat_1, np.hstack((R1, t)), intrinsic_mat, triangulation_params
-    )
+    for R, t in [(R1, t_abs), (R2, t_abs), (R1, -t_abs), (R2, -t_abs)]:
+        _, corr_ids, _ = triangulate_correspondences(
+            correspondence, view_mat_1, np.hstack((R, t)), intrinsic_mat, triangulation_params
+        )
 
-    _, corr_ids2, _ = triangulate_correspondences(
-        correspondence, view_mat_1, np.hstack((R2, t)), intrinsic_mat, triangulation_params
-    )
+        stats.append([R, t, len(corr_ids)])
 
-    if len(corr_ids1) > len(corr_ids2):
-        return R1, len(corr_ids1)
-    else:
-        return R2, len(corr_ids2)
+    return sorted(stats, key=lambda x: x[2])[-1]
 
 
 def collect_views(i, j, R, t):
@@ -71,7 +68,7 @@ def find_known_views(corner_storage: CornerStorage, intrinsic_mat: np.ndarray):
     scores = []
 
     for i in range(n):
-        for j in range(i + 5, n):
+        for j in range(i + 1, n):
             intersection, indices = snp.intersect(corner_storage[i].ids.reshape(-1), corner_storage[j].ids.reshape(-1), indices=True)
 
             if len(intersection) < 10:
@@ -81,10 +78,17 @@ def find_known_views(corner_storage: CornerStorage, intrinsic_mat: np.ndarray):
             points2 = corner_storage[j].points[indices[1]]
             essential_mat, inliers = cv2.findEssentialMat(points1, points2, intrinsic_mat, method=cv2.RANSAC, threshold=threshold)
 
+            if essential_mat is None or inliers is None:
+                continue
+
             mask = inliers.reshape(-1) == 1
 
+            homography, h_inliers = cv2.findHomography(points1, points2, method=cv2.RANSAC, ransacReprojThreshold=threshold)
+            if (h_inliers.reshape(-1) == 1).sum() > 0.3 * mask.sum():
+                continue
+
             R1, R2, t = cv2.decomposeEssentialMat(essential_mat)
-            R, val = get_best_view(points1[mask], points2[mask], intersection[mask], intrinsic_mat, R1, R2, t)
+            R, t, val = get_best_view(points1[mask], points2[mask], intersection[mask], intrinsic_mat, R1, R2, t)
 
             scores.append([i, j, R, t, val])
 
