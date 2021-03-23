@@ -291,6 +291,13 @@ class PointCloudBuilder:
         self._points = np.vstack((self.points, np.delete(points, idx_2, axis=0)))
         self._sort_data()
 
+    def remove_points(self, ids: np.ndarray) -> None:
+        _, (idx_1, idx_2) = snp.intersect(self.ids.flatten(), ids, indices=True)
+        mask = np.ones(self._ids.flatten().shape, dtype=np.bool)
+        mask[idx_1] = False
+        self._ids = self._ids[mask]
+        self._points = self.points[mask]
+
     def set_colors(self, colors: np.ndarray) -> None:
         assert self._ids.size == colors.shape[0]
         self._colors = colors
